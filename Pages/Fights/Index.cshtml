@@ -1,165 +1,410 @@
 @page
 @model UfcStatsWeb.Pages.Fights.IndexModel
+@using System.Globalization
 @{
-    Layout = "~/Views/Shared/_Layout.cshtml";
-    ViewData["Title"] = "Fights";
-    ViewData["BodyClass"] = "fights-index";
-    var fights = Model.Fights?.ToList() ?? new List<UfcStatsWeb.Models.FightRecord>();
+ Layout = "~/Views/Shared/_Layout.cshtml";
+ ViewData["Title"] = "Fights";
+ ViewData["BodyClass"] = "fights-index";
+
+ var fights = Model.Fights?.ToList() ?? new List<UfcStatsWeb.Models.FightRecord>();
+
+ static string ShortLocation(string loc)
+ {
+ if (string.IsNullOrWhiteSpace(loc)) return string.Empty;
+ var parts = loc.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).ToArray();
+ // prefer city, country if present; otherwise first segment
+ if (parts.Length ==1) return parts[0];
+ if (parts.Length >=2) return parts[0] + ", " + parts[1];
+ return parts[0];
+ }
+
+ static string ExtractWeightClass(string boutType)
+ {
+ if (string.IsNullOrWhiteSpace(boutType)) return "Unknown";
+ var bt = boutType.ToLowerInvariant();
+
+ // detect female indicator
+ var isFemale = bt.Contains("women") || bt.Contains("women's") || bt.Contains("female") || bt.Contains("wmn");
+
+ // canonical mapping of substrings to class base names
+ var map = new (string key, string name)[] {
+ ("atom", "Atomweight"),
+ ("straw", "Strawweight"),
+ ("fly", "Flyweight"),
+ ("bantam", "Bantamweight"),
+ ("feather", "Featherweight"),
+ ("lightweight", "Lightweight"),
+ ("welter", "Welterweight"),
+ ("middle", "Middleweight"),
+ ("light heavy", "Light Heavyweight"),
+ ("light-heavy", "Light Heavyweight"),
+ ("lightheavy", "Light Heavyweight"),
+ ("cruiser", "Cruiserweight"),
+ ("heavy", "Heavyweight"),
+ };
+
+ foreach (var (key, name) in map)
+ {
+ if (bt.Contains(key))
+ {
+ // For women, prefix with "Women's "; for men, just the class name (e.g. "Bantamweight")
+ return (isFemale ? "Women's " : "") + name;
+ }
+ }
+
+ // If no known mapping but it contains 'women' prefix, try to extract the following word(s)
+ if (isFemale)
+ {
+ // try to find something like "women's bantamweight"
+ var tokens = bt.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+ var idx = Array.FindIndex(tokens, t => t.Contains("women") || t.Contains("female"));
+ if (idx >=0 && idx +1 < tokens.Length)
+ {
+ var candidate = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(tokens[idx +1]);
+ return "Women's " + candidate;
+ }
+ }
+
+ // fallback: title-case the boutType and prefix Men's if it looks like a class name (no explicit gender)
+ var title = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(boutType);
+ // Default: no "Men's" prefix; women's classes are already handled above
+ return title;
+ }
+
+ static string NormalizeName(string s)
+ {
+ if (string.IsNullOrWhiteSpace(s)) return s;
+ // preserve existing capitalization for initials and special cases by lowercasing first then title-casing
+ var lowered = s.ToLowerInvariant();
+ // handle multiple spaces and punctuation correctly
+ return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(lowered);
+ }
+
+ static string ShortenMethod(string method)
+ {
+ if (string.IsNullOrWhiteSpace(method)) return string.Empty;
+ var m = method.ToLowerInvariant();
+
+ // Decision abbreviations
+ if (m.Contains("decision") && m.Contains("unanimous")) return "UD";
+ if (m.Contains("decision") && m.Contains("split")) return "SD";
+ if (m.Contains("decision") && m.Contains("majority")) return "MD";
+
+ // common short forms remain unchanged
+ if (m.Contains("tko")) return "TKO";
+ if (m.Contains("ko") && !m.Contains("tko")) return "KO";
+ if (m.Contains("submission") || m.Contains("sub")) return "SUB";
+
+ // fallback: try to shorten 'decision - xxx' to abbreviation if present
+ if (m.StartsWith("decision") && m.Contains("unanimous")) return "UD";
+
+ // otherwise return original shortened to title-case, but keep short
+ return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(method);
+ }
+
+ // Determine distinct years and weight classes for filters
+ var years = fights.Where(f => f.EventDate.HasValue).Select(f => f.EventDate.Value.Year).Distinct().OrderBy(y => y).ToList();
+ var weightClasses = fights.Select(f => ExtractWeightClass(f.BoutType)).Distinct().OrderBy(x => x).ToList();
+ var events = fights.Select(f => f.EventName ?? string.Empty).Where(e => !string.IsNullOrWhiteSpace(e)).Distinct().OrderBy(e => e).ToList();
+ // default to most recent event
+ var defaultEvent = fights.OrderByDescending(f => f.EventDate ?? DateTime.MinValue).Select(f => f.EventName).FirstOrDefault(e => !string.IsNullOrWhiteSpace(e)) ?? string.Empty;
 }
 
 <div class="container">
 
-    <form method="get" class="mb-3" onsubmit="return false;">
-        <div class="input-group input-group-sm">
-            <input name="q" id="searchBox" value="@Model.q" class="form-control form-control-sm" placeholder="Search fighter, event or location…" aria-label="Search" />
-            <a class="btn btn-outline-secondary btn-sm" asp-page="/Fights/Index">Reset</a>
-        </div>
-    </form>
+ <div class="controls d-flex gap-2 align-items-center mb-3">
+ <div class="filters">
+ <select id="filterYear" class="form-select form-select-sm filter-compact" aria-label="Filter by year">
+ <option value="">All years</option>
+ @foreach (var y in years) { <option value="@y">@y</option> }
+ </select>
 
-    <div class="table-wrap card shadow-sm p-3 table-card" role="region" aria-label="Fights table">
-        <table id="fightsTable" class="table table-sm table-hover ufc-table mb-0">
-            <thead>
-                <tr>
-                    <th class="sortable" data-type="date">Date<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="text">Event<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="text">Location<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="text">Red<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="text">Blue<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="text">Result<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="text">Method<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="number">Rnd<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="text">Time<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="number">R KD<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="number">B KD<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="number">R SS<span class="sort-indicator"></span></th>
-                    <th class="sortable" data-type="number">B SS<span class="sort-indicator"></span></th>
-                    <th class="col-details">Details</th>
-                </tr>
-            </thead>
+ <select id="filterTitle" class="form-select form-select-sm filter-compact" aria-label="Filter by title fights">
+ <option value="">All fights</option>
+ <option value="true">Title fights only</option>
+ <option value="false">Non-title only</option>
+ </select>
 
-            <tbody>
+ <select id="filterWeight" class="form-select form-select-sm filter-compact" aria-label="Filter by weight class">
+ <option value="">All weight classes</option>
+ @foreach (var w in weightClasses) { <option value="@w">@w</option> }
+ </select>
 
-                @functions {
-                    string NormalizeName(string s)
-                    {
-                        if (string.IsNullOrWhiteSpace(s)) return s;
-                        return System.Globalization.CultureInfo.InvariantCulture.TextInfo
-                        .ToTitleCase(s.ToLowerInvariant());
-                    }
-                }
+ <select id="filterEvent" class="form-select form-select-sm filter-compact" aria-label="Filter by event" data-default="@defaultEvent">
+ <option value="">All events</option>
+ @foreach (var ev in events) { <option value="@ev" @(ev == defaultEvent ? "selected" : "")>@ev</option> }
+ </select>
 
+ </div>
 
-                @foreach (var r in fights)
-                {
-                    var search = string.Join(" ",
-                    new[] { r.RedFighterName, r.BlueFighterName, r.EventName, r.EventLocation,
-                                r.RedFighterNickname, r.BlueFighterNickname })
-                    .ToLowerInvariant();
+ <button id="clearFilters" class="btn btn-outline-secondary btn-sm ms-2 reset-left" title="Reset filters">Reset</button>
 
-                    <tr data-search="@search">
-                        <td class="nowrap muted"
-                            data-sort-value="@((r.EventDate?.ToString("yyyy-MM-dd") ?? ""))">
-                            <span class="cell-truncate">@((r.EventDate?.ToString("dd/MM/yy") ?? ""))</span>
-                        </td>
+ <div class="legend ms-auto d-none d-md-block small text-muted" aria-live="polite">Visible: <strong id="resultCount">@fights.Count</strong></div>
+ </div>
 
-                        <td data-sort-value="@r.EventName" class="muted">
-                            <span class="cell-truncate">@r.EventName</span>
-                        </td>
+ <div class="table-wrap card shadow-sm p-3 table-card" role="region" aria-label="Fights table">
+ <table id="fightsTable" class="table table-sm table-hover ufc-table mb-0">
+ <thead>
+ <tr>
+ <th class="sortable" data-type="text">Name <small class="text-muted">(nickname)</small><span class="sort-indicator"></span></th>
+ <th class="sortable" data-type="text">Method<span class="sort-indicator"></span></th>
+ <th class="sortable" data-type="text">Weight Class<span class="sort-indicator"></span></th>
+ <th class="sortable" data-type="text">Event<span class="sort-indicator"></span></th>
+ </tr>
+ </thead>
+ <tbody>
+ @foreach (var r in fights)
+ {
+ // Determine whether bout should be treated as a title fight. Exclude Ultimate Fighter / TUF style bouts.
+ var btLower = (r.BoutType ?? string.Empty).ToLowerInvariant();
+ var isUltimate = btLower.Contains("ultimate fighter") || btLower.Contains("the ultimate fighter") || btLower.Contains("tuf") || btLower.Contains("ultimate");
+ var isTitle = !isUltimate && btLower.Contains("title");
 
-                        <td data-sort-value="@r.EventLocation" class="muted">
-                            <span class="cell-truncate">@r.EventLocation</span>
-                        </td>
+ var weightClass = ExtractWeightClass(r.BoutType);
 
-                        <td>
-                            <span class="cell-truncate">
-                                @NormalizeName(r.RedFighterName)
-                                @if (!string.IsNullOrWhiteSpace(r.RedFighterNickname))
-                                {
-                                    <small class="text-muted ms-1">(@NormalizeName(r.RedFighterNickname))</small>
-                                }
-                            </span>
-                        </td>
+ string Normalize(string s) => (s ?? string.Empty).ToLowerInvariant();
+ var redRes = Normalize(r.RedFighterResult);
+ var blueRes = Normalize(r.BlueFighterResult);
 
-                        <td>
-                            <span class="cell-truncate">
-                                @NormalizeName(r.BlueFighterName)
-                                @if (!string.IsNullOrWhiteSpace(r.BlueFighterNickname))
-                                {
-                                    <small class="text-muted ms-1">(@NormalizeName(r.BlueFighterNickname))</small>
-                                }
-                            </span>
-                        </td>
+ bool redWin = false, blueWin = false, redLoss = false, blueLoss = false;
+ var winKeywords = new[] { "ko", "tko", "submission", "sub", "decision", "ud", "sd", "md", "retired", "win", "w" };
+ var lossKeywords = new[] { "loss", "lost", "defeat", "def" };
 
-                        <td data-sort-value="@($"{r.RedFighterResult}/{r.BlueFighterResult}")">
-                            <span class="cell-truncate">@r.RedFighterResult / @r.BlueFighterResult</span>
-                        </td>
+ foreach (var k in winKeywords)
+ {
+ if (!string.IsNullOrWhiteSpace(redRes) && (redRes.Contains(k) && k != "w" || redRes.StartsWith("w"))) redWin = true;
+ if (!string.IsNullOrWhiteSpace(blueRes) && (blueRes.Contains(k) && k != "w" || blueRes.StartsWith("w"))) blueWin = true;
+ }
+ foreach (var k in lossKeywords)
+ {
+ if (!string.IsNullOrWhiteSpace(redRes) && redRes.Contains(k)) redLoss = true;
+ if (!string.IsNullOrWhiteSpace(blueRes) && blueRes.Contains(k)) blueLoss = true;
+ }
+ // Infer winner if other side indicates loss
+ if (!redWin && blueLoss) redWin = true;
+ if (!blueWin && redLoss) blueWin = true;
 
-                        <td data-sort-value="@r.Method">
-                            <span class="cell-truncate">@r.Method</span>
-                        </td>
+ if (!redWin && !blueWin)
+ {
+ if (redRes.Contains("win")) redWin = true;
+ if (blueRes.Contains("win")) blueWin = true;
+ }
 
-                        <td class="nowrap" data-sort-value="@r.Round">
-                            <span class="cell-truncate">@r.Round</span>
-                        </td>
+ if (redWin && redLoss) redLoss = false;
+ if (blueWin && blueLoss) blueLoss = false;
 
-                        <td class="nowrap" data-sort-value="@r.Time">
-                            <span class="cell-truncate">@r.Time</span>
-                        </td>
+ var shortLocation = ShortLocation(r.EventLocation);
+ var dateText = r.EventDate.HasValue ? r.EventDate.Value.ToString("dd MMM yyyy", CultureInfo.InvariantCulture) : string.Empty;
+ var fightSearch = string.Join(" ", new[] { r.RedFighterName, r.BlueFighterName, r.RedFighterNickname, r.BlueFighterNickname, r.EventName, shortLocation }).ToLowerInvariant();
+ var methodDisplay = ShortenMethod(r.Method);
 
-                        <td class="nowrap" data-sort-value="@r.RedFighterKD">
-                            <span class="cell-truncate">@r.RedFighterKD</span>
-                        </td>
+ <tr data-year="@(r.EventDate?.Year.ToString() ?? "")" data-is-title="@isTitle.ToString().ToLowerInvariant()" data-weight="@weightClass" data-event="@(r.EventName ?? string.Empty)" data-search="@fightSearch">
+ <td>
+ <div>
+ <strong class="me-2">@NormalizeName(r.RedFighterName)</strong>
+ @if (!string.IsNullOrWhiteSpace(r.RedFighterNickname))
+ {
+ <small class="text-muted">(@NormalizeName(r.RedFighterNickname))</small>
+ }
+ @if (isTitle && redWin)
+ {
+ <span class="ms-2 champion-icon" title="Title winner"><img src="/images/belt.svg" alt="Title winner" class="belt-icon" width="18" height="12" /></span>
+ }
+ @if (!isTitle && redWin)
+ {
+ <span class="ms-2 win-icon" title="Winner">W</span>
+ }
+ else if (redLoss)
+ {
+ <span class="ms-2 loss-icon" title="Loser">L</span>
+ }
+ </div>
 
-                        <td class="nowrap" data-sort-value="@r.BlueFighterKD">
-                            <span class="cell-truncate">@r.BlueFighterKD</span>
-                        </td>
+ <div class="mt-2">
+ <strong class="me-2">@NormalizeName(r.BlueFighterName)</strong>
+ @if (!string.IsNullOrWhiteSpace(r.BlueFighterNickname))
+ {
+ <small class="text-muted">(@NormalizeName(r.BlueFighterNickname))</small>
+ }
+ @if (isTitle && blueWin)
+ {
+ <span class="ms-2 champion-icon" title="Title winner"><img src="/images/belt.svg" alt="Title winner" class="belt-icon" width="18" height="12" /></span>
+ }
+ @if (!isTitle && blueWin)
+ {
+ <span class="ms-2 win-icon" title="Winner">W</span>
+ }
+ else if (blueLoss)
+ {
+ <span class="ms-2 loss-icon" title="Loser">L</span>
+ }
+ </div>
+ </td>
 
-                        <td class="nowrap" data-sort-value="@r.RedFighterSigStr">
-                            <span class="cell-truncate">@r.RedFighterSigStr</span>
-                        </td>
+ <td data-sort-value="@(r.Method ?? "")">
+ <span class="cell-truncate">@methodDisplay</span>
+ </td>
 
-                        <td class="nowrap" data-sort-value="@r.BlueFighterSigStr">
-                            <span class="cell-truncate">@r.BlueFighterSigStr</span>
-                        </td>
+ <td data-sort-value="@weightClass">@weightClass</td>
 
-                        <td>
-                            <details>
-                                <summary>Show</summary>
-                                <pre class="table-json">
-    @System.Text.Json.JsonSerializer.Serialize(
-        r,
-        new System.Text.Json.JsonSerializerOptions { WriteIndented = true }
-)
-                            </pre>
-                        </details>
-                    </td>
-                </tr>
-                                }
-            </tbody>
-        </table>
-    </div>
+ <td data-sort-value="@(r.EventName ?? "")">
+ <div>@r.EventName</div>
+ <div><small class="text-muted">@shortLocation@if(!string.IsNullOrEmpty(dateText)){<text> — @dateText</text>}</small></div>
+ </td>
+ </tr>
+ }
+ </tbody>
+ </table>
+ </div>
 
-        </div>
-    </div>
 </div>
 
 @section Scripts {
 <script>
-    (function () {
-        const searchBox = document.getElementById('searchBox');
-        const rows = Array.from(document.querySelectorAll('#fightsTable tbody tr'));
+ (function () {
+ const filterYear = document.getElementById('filterYear');
+ const filterTitle = document.getElementById('filterTitle');
+ const filterWeight = document.getElementById('filterWeight');
+ const filterEvent = document.getElementById('filterEvent');
+ const clearBtn = document.getElementById('clearFilters');
+ const resultCount = document.getElementById('resultCount');
+ const tbody = document.querySelector('#fightsTable tbody');
+ const ths = Array.from(document.querySelectorAll('#fightsTable thead th.sortable'));
+ let currentSort = { index: -1, asc: true };
 
-        function norm(s) { return (s || '').toLowerCase(); }
+ // read default event from data-default attribute
+ const defaultEvent = (filterEvent && filterEvent.dataset && filterEvent.dataset.default) ? filterEvent.dataset.default : '';
 
-        function applyFilters() {
-            const q = norm(searchBox.value);
-            rows.forEach(r => {
-                const txt = r.getAttribute('data-search') || '';
-                r.style.display = q === '' || txt.includes(q) ? '' : 'none';
-            });
-        }
+ function norm(s) { return (s || '').toLowerCase(); }
 
-        searchBox.addEventListener('input', applyFilters);
-    })();
-</script>
-}
+ function getRows() { return tbody ? Array.from(tbody.querySelectorAll('tr')) : []; }
+
+ function updateStripes() {
+ const rows = getRows();
+ let visibleIndex =0;
+ rows.forEach(r => {
+ if (r.style.display === 'none') {
+ r.classList.remove('strip-odd');
+ r.classList.remove('strip-even');
+ return;
+ }
+ if ((visibleIndex %2) ===0) {
+ r.classList.remove('strip-odd');
+ r.classList.add('strip-even');
+ } else {
+ r.classList.remove('strip-even');
+ r.classList.add('strip-odd');
+ }
+ visibleIndex++;
+ });
+ }
+
+ function applyFilters() {
+ const year = filterYear ? filterYear.value : '';
+ const title = filterTitle ? filterTitle.value : '';
+ const weight = filterWeight ? filterWeight.value : '';
+ const event = filterEvent ? filterEvent.value : '';
+ 
+ let visible =0;
+ const rows = getRows();
+ rows.forEach r => {
+ const ry = r.getAttribute('data-year') || '';
+ const rt = r.getAttribute('data-is-title') || 'false';
+ const rw = r.getAttribute('data-weight') || '';
+ const re = r.getAttribute('data-event') || '';
+ 
+ const okYear = year === '' || ry === year;
+ const okTitle = title === '' || rt === title;
+ const okWeight = weight === '' || rw === weight;
+ const okEvent = event === '' || re === event;
+ 
+ const show = (okYear && okTitle && okWeight && okEvent);
+ r.style.display = show ? '' : 'none';
+ if (show) visible++;
+ });
+ 
+ if (resultCount) resultCount.textContent = visible;
+ updateStripes();
+ }
+
+ function getCellValue(row, idx) {
+ const td = row.children[idx];
+ if (!td) return '';
+ return td.dataset.sortValue ?? (td.textContent ?? '').trim();
+ }
+
+ function compareValues(aVal, bVal, type) {
+ if (type === 'number') {
+ const an = parseFloat(aVal);
+ const bn = parseFloat(bVal);
+ const aNum = isNaN(an) ? -Infinity : an;
+ const bNum = isNaN(bn) ? -Infinity : bn;
+ return aNum - bNum;
+ } else {
+ return aVal.toString().localeCompare(bVal.toString(), undefined, { numeric: true, sensitivity: 'base' });
+ }
+ }
+
+ function sortByColumn(colIndex, type) {
+ if (currentSort.index === colIndex) currentSort.asc = !currentSort.asc;
+ else { currentSort.index = colIndex; currentSort.asc = true; }
+ 
+ ths.forEach(th => th.classList.remove('sorted','asc','desc'));
+ const activeTh = Array.from(document.querySelectorAll('#fightsTable thead th'))[colIndex];
+ if (activeTh) activeTh.classList.add('sorted', currentSort.asc ? 'asc' : 'desc');
+ 
+ const rows = getRows();
+ rows.sort((a, b) => {
+ const aVal = getCellValue(a, colIndex);
+ const bVal = getCellValue(b, colIndex);
+ const cmp = compareValues(aVal, bVal, type);
+ return currentSort.asc ? cmp : -cmp;
+ });
+ 
+ rows.forEach(r => tbody.appendChild(r));
+ applyFilters();
+ }
+ 
+ ths.forEach(th => {
+ const colIndex = Array.from(th.parentNode.children).indexOf(th);
+ const type = th.dataset.type || 'text';
+ th.addEventListener('click', () => sortByColumn(colIndex, type));
+ });
+ 
+ // live updates on selects - attach to all filters present in the DOM
+ Array.from(document.querySelectorAll('.controls .filters select')).forEach(el => {
+ el.addEventListener('change', applyFilters);
+ });
+ 
+ if (clearBtn) {
+ clearBtn.addEventListener('click', () => {
+ if (filterYear) filterYear.value = '';
+ if (filterTitle) filterTitle.value = '';
+ if (filterWeight) filterWeight.value = '';
+ // when clearing, set event to default (most recent) if available
+ if (filterEvent) filterEvent.value = defaultEvent || '';
+ applyFilters();
+ });
+ }
+ 
+ // on load: if no event selected (All events), default to most recent
+ if (filterEvent) {
+ if (!filterEvent.value || filterEvent.value === '') {
+ if (defaultEvent) {
+ filterEvent.value = defaultEvent;
+ }
+ }
+ }
+
+ // initial sort
+ if (ths.length) {
+ // default: sort by Name column (0)
+ sortByColumn(0, ths[0].dataset.type || 'text');
+ } else {
+ applyFilters();
+ updateStripes();
+ }
+ 
+ })();
+ </script>
+ }

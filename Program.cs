@@ -12,6 +12,9 @@ builder.Services.AddSingleton<IUfcDataService, UfcDataService>();
 // new CSV service (added)
 builder.Services.AddSingleton<IFightsDataService, FightsCsvService>();
 
+// rankings CSV service
+builder.Services.AddSingleton<IRankingsDataService, RankingsCsvService>();
+
 var app = builder.Build();
 
 if (!app.Environment.IsDevelopment())

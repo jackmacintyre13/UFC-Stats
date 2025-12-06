@@ -1,0 +1,174 @@
+@page
+@model UfcStatsWeb.Pages.Rankings.IndexModel
+@{
+ Layout = "~/Views/Shared/_Layout.cshtml";
+ ViewData["Title"] = "Rankings";
+ ViewData["BodyClass"] = "rankings-index";
+
+ var rankings = Model.Rankings?.ToList() ?? new List<UfcStatsWeb.Models.Ranking>();
+
+ // Group divisions
+ var groups = rankings
+ .Where(r => !string.IsNullOrWhiteSpace(r.Division))
+ .GroupBy(r => r.Division!.Trim())
+ .ToList();
+
+ // Split PFP and non-PFP
+ var pfpGroups = groups.Where(g => g.Key != null && g.Key.IndexOf("pound", System.StringComparison.OrdinalIgnoreCase) >=0).ToList();
+ var nonPfpGroups = groups.Where(g => g.Key == null || g.Key.IndexOf("pound", System.StringComparison.OrdinalIgnoreCase) <0).ToList();
+
+ int GetWeightIndex(string key)
+ {
+ if (string.IsNullOrEmpty(key)) return int.MaxValue;
+ var k = key.ToLowerInvariant();
+ // order from lightest to heaviest
+ if (k.Contains("atom")) return 0;
+ if (k.Contains("straw")) return 1;
+ if (k.Contains("fly") && !k.Contains("super")) return 2;
+ if (k.Contains("bantam")) return 3;
+ if (k.Contains("feather")) return 4;
+ if (k.Contains("lightweight") && !k.Contains("light heavy")) return 5;
+ if (k.Contains("welter")) return 6;
+ if (k.Contains("middle")) return 7;
+ if (k.Contains("light heavy") || k.Contains("light-heavy") || k.Contains("lightheavy")) return 8;
+ if (k.Contains("cruiser")) return 9;
+ if (k.Contains("heavy")) return 10;
+ // fallback
+ return 1000 + key.GetHashCode();
+ }
+
+ nonPfpGroups = nonPfpGroups
+ .OrderBy(g => GetWeightIndex(g.Key ?? string.Empty))
+ .ThenBy(g => g.Key)
+ .ToList();
+}
+
+	
+<div class="container-fluid px-4">
+ <div class="row" id="rankingsGrid">
+ @* Non-PFP groups first, ordered light->heavy *@
+ @foreach (var g in nonPfpGroups)
+ {
+ var rawKey = g.Key ?? string.Empty;
+ var displayTitle = rawKey;
+
+ <div class="col-12 col-sm-6 col-md-4 col-lg-3 mb-3">
+ <div class="card shadow-sm h-100 table-card">
+ <div class="card-body p-2">
+ <h6 class="card-title mb-2">@displayTitle</h6>
+ <div class="table-wrap">
+ <table class="table table-sm table-hover ufc-table rankings-table mb-0">
+ <thead>
+ <tr>
+ <th style="width:64px; text-align:left;">Rank</th>
+ <th style="text-align:left;">Name</th>
+ </tr>
+ </thead>
+ <tbody>
+ @{ bool championRendered = false; }
+ @foreach (var r in g.OrderBy(x => x.Rank))
+ {
+ // For non-PFP lists mark the first Rank==0 as champion and skip duplicate zeros
+ if (r.Rank ==0 && championRendered)
+ {
+ continue; // skip duplicate rank0 entries
+ }
+
+ var isChampion = false;
+ if (r.Rank ==0 && !championRendered)
+ {
+ isChampion = true;
+ championRendered = true;
+ }
+
+ var badgeText = isChampion ? "C" : r.Rank.ToString();
+ var rowClass = isChampion ? "champion-row" : string.Empty;
+ var search = string.Join(" ", new[] { rawKey, r.Name ?? string.Empty }).ToLowerInvariant();
+
+ <tr class="@rowClass" data-search="@search">
+ <td class="nowrap" style="text-align:left;"><div class="rank-badge @(isChampion ? "champion" : string.Empty)">@badgeText</div></td>
+ <td style="text-align:left;">
+ @if (!string.IsNullOrWhiteSpace(r.Profile_Link))
+ {
+ <a class="cell-truncate text-reset text-decoration-none" href="@r.Profile_Link" target="_blank" rel="noopener">@r.Name</a>
+ }
+ else
+ {
+ <span class="cell-truncate">@r.Name</span>
+ }
+ </td>
+ </tr>
+ }
+ </tbody>
+ </table>
+ </div>
+ </div>
+ </div>
+ </div>
+ }
+
+ @* PFP groups last *@
+ @foreach (var g in pfpGroups)
+ {
+ var rawKey = g.Key ?? string.Empty;
+ var displayTitle = rawKey;
+ if (rawKey.IndexOf("women", System.StringComparison.OrdinalIgnoreCase) >=0 || rawKey.IndexOf("female", System.StringComparison.OrdinalIgnoreCase) >=0)
+ {
+ displayTitle = "Women's Pound-For-Pound";
+ }
+ else
+ {
+ displayTitle = "Men's Pound-For-Pound";
+ }
+
+ <div class="col-12 col-sm-6 col-md-4 col-lg-3 mb-3">
+ <div class="card shadow-sm h-100 table-card">
+ <div class="card-body p-2">
+ <h6 class="card-title mb-2">@displayTitle</h6>
+ <div class="table-wrap">
+ <table class="table table-sm table-hover ufc-table rankings-table mb-0">
+ <thead>
+ <tr>
+ <th style="width:64px; text-align:left;">Rank</th>
+ <th style="text-align:left;">Name</th>
+ </tr>
+ </thead>
+ <tbody>
+ @foreach (var r in g.OrderBy(x => x.Rank))
+ {
+ // For PFP lists skip rank==0 duplicates (do not mark champions in PFP lists)
+ if (r.Rank ==0) { continue; }
+
+ var search = string.Join(" ", new[] { rawKey, r.Name ?? string.Empty }).ToLowerInvariant();
+
+ <tr data-search="@search">
+ <td class="nowrap" style="text-align:left;"><div class="rank-badge">@r.Rank</div></td>
+ <td style="text-align:left;">
+ @if (!string.IsNullOrWhiteSpace(r.Profile_Link))
+ {
+ <a class="cell-truncate text-reset text-decoration-none" href="@r.Profile_Link" target="_blank" rel="noopener">@r.Name</a>
+ }
+ else
+ {
+ <span class="cell-truncate">@r.Name</span>
+ }
+ </td>
+ </tr>
+ }
+ </tbody>
+ </table>
+ </div>
+ </div>
+ </div>
+ </div>
+ }
+ </div>
+</div>
+
+@section Scripts {
+<script>
+ (function () {
+ // No search box on this page
+ })();
+</script>
+}
