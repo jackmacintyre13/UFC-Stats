@@ -1,0 +1,245 @@
+﻿@model IReadOnlyList<UfcStatsWeb.Models.FighterStat>
+@using System.Globalization
+@{
+    ViewData["Title"] = "UFC Fighter Database";
+    ViewData["BodyClass"] = "home-index";
+
+    var fighters = Model ?? new List<UfcStatsWeb.Models.FighterStat>();
+    var stances = fighters.Select(m => m.Stance ?? "Unknown").Distinct().OrderBy(x => x).ToList();
+    var years = fighters.Where(m => m.DateOfBirth.HasValue)
+                       .Select(m => m.DateOfBirth!.Value.Year)
+                       .Distinct().OrderBy(x => x).ToList();
+
+    var total = fighters.Count;
+}
+
+<div class="container">
+
+
+    <div class="controls d-flex gap-2 align-items-center mb-3">
+        <div class="search">
+            <span class="icon"><i class="bi bi-search"></i></span>
+            <input id="searchBox" type="search" placeholder="Search name or nickname…" aria-label="Search fighters" class="form-control form-control-sm search-input" />
+        </div>
+
+        <div class="filters">
+            <select id="filterStance" class="form-select form-select-sm filter-compact" aria-label="Filter by stance">
+                <option value="" disabled selected hidden>All stances</option>
+                @foreach (var s in stances) { <option value="@s">@s</option> }
+            </select>
+
+            <select id="filterYear" class="form-select form-select-sm filter-compact year-compact" aria-label="Filter by birth year">
+                <option value="">All years</option>
+                @foreach (var y in years) { <option value="@y">@y</option> }
+            </select>
+
+            <input id="filterWins" class="form-control form-control-sm filter-compact wins-compact" type="number" min="0" placeholder="Min wins" aria-label="Minimum wins" />
+
+            <button id="clearFilters" class="btn btn-outline-secondary btn-sm" title="Reset filters">Reset</button>
+        </div>
+
+        <div class="legend ms-auto d-none d-md-block" aria-live="polite">Visible: <strong id="resultCount">@total</strong></div>
+    </div>
+
+    <div class="table-wrap card shadow-sm p-3 table-card" role="region" aria-labelledby="resultCount">
+        <table id="fightersTable" class="table table-sm table-hover ufc-table mb-0" aria-describedby="resultCount">
+            <thead>
+                <tr>
+                    <th data-type="text" class="sortable">Name<span class="sort-indicator"></span></th>
+                    <th data-type="text" class="sortable">Stance<span class="sort-indicator"></span></th>
+                    <th data-type="number" class="sortable">W-L-D<span class="sort-indicator"></span></th>
+                    <th data-type="number" class="sortable">Height (cm)<span class="sort-indicator"></span></th>
+                    <th data-type="number" class="sortable">Weight (lbs)<span class="sort-indicator"></span></th>
+                    <th data-type="number" class="sortable">Reach (cm)<span class="sort-indicator"></span></th>
+                    <th data-type="date" class="sortable">DOB<span class="sort-indicator"></span></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var f in fighters)
+                {
+                    var w = f.Wins ?? 0;
+                    var l = f.Losses ?? 0;
+                    var d = f.Draws ?? 0;
+                    var fights = w + l + d;
+                    var winPct = fights > 0 ? Math.Round((double)w / fights * 100.0, 1) : 0.0;
+
+                    var weightLbs = f.WeightInKg.HasValue
+                        ? Math.Round((double)f.WeightInKg.Value * 2.2046226218, 1)
+                        : (double?)null;
+
+                    <tr data-name="@($"{f.Name ?? ""} {f.Nickname ?? ""}")"
+                        data-stance="@(f.Stance ?? "Unknown")"
+                        data-year="@(f.DateOfBirth?.Year.ToString() ?? "")"
+                        data-wins="@(w.ToString(CultureInfo.InvariantCulture))"
+                        data-fights="@(fights.ToString(CultureInfo.InvariantCulture))"
+                        data-winpct="@(winPct.ToString(CultureInfo.InvariantCulture))">
+                        <td data-sort-value="@(f.Name ?? "")">@f.Name</td>
+                        <td data-sort-value="@(f.Stance ?? "Unknown")">@{ var stanceText = f.Stance ?? "Unknown"; }@stanceText</td>
+                        <td data-sort-value="@(w.ToString(CultureInfo.InvariantCulture))" class="nowrap">@(w)-@(l)-@(d)</td>
+                        <td data-sort-value="@(f.HeightCm?.ToString(CultureInfo.InvariantCulture) ?? "")" class="muted">@f.HeightCm</td>
+
+                        <td data-sort-value="@(weightLbs.HasValue ? weightLbs.Value.ToString(CultureInfo.InvariantCulture) : "")" class="muted">
+                            @(weightLbs.HasValue ? weightLbs.Value.ToString("0.#", CultureInfo.InvariantCulture) + " lbs" : "")
+                        </td>
+
+                        <td data-sort-value="@(f.ReachInCm?.ToString(CultureInfo.InvariantCulture) ?? "")" class="muted">@f.ReachInCm</td>
+                        <td data-sort-value="@(f.DateOfBirth?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "")" class="muted date">@(f.DateOfBirth?.ToString("dd/MM/yy", CultureInfo.InvariantCulture))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    (function () {
+        const MIN_FIGHTS_DEFAULT = 15; // start by showing fighters with >= 15 fights
+        const searchBox   = document.getElementById('searchBox');
+        const filterStance= document.getElementById('filterStance');
+        const filterYear  = document.getElementById('filterYear');
+        const filterWins  = document.getElementById('filterWins');
+        const clearBtn    = document.getElementById('clearFilters');
+        const rows        = Array.from(document.querySelectorAll('#fightersTable tbody tr'));
+        const resultCount = document.getElementById('resultCount');
+        const tbody       = document.querySelector('#fightersTable tbody');
+        const ths         = Array.from(document.querySelectorAll('#fightersTable thead th.sortable'));
+        let currentSort = { index: -1, asc: true };
+
+        function norm(s) { return (s || '').toLowerCase(); }
+
+        function applyFilters() {
+            const q    = norm(searchBox.value);
+            const stan = filterStance.value;
+            const year = filterYear.value;
+            const minW = parseInt(filterWins.value || "0", 10);
+            const minFights = MIN_FIGHTS_DEFAULT;
+
+            let visible = 0;
+            rows.forEach(row => {
+                const name = norm(row.getAttribute('data-name') || '');
+                const rs   = row.getAttribute('data-stance') || '';
+                const ry   = row.getAttribute('data-year') || '';
+                const wins = parseInt(row.getAttribute('data-wins') || "0", 10);
+                const fights = parseInt(row.getAttribute('data-fights') || "0", 10);
+
+                const okSearch = q === '' || name.includes(q);
+                // treat empty string as no-filter (placeholder)
+                const okStance = stan === '' || rs === stan;
+                const okYear   = year === '' || ry === year;
+                const okWins   = wins >= minW;
+                const okFights = fights >= minFights;
+
+                const show = (okSearch && okStance && okYear && okWins && okFights);
+                row.style.display = show ? '' : 'none';
+                if (show) visible++;
+            });
+
+            if (resultCount) resultCount.textContent = visible;
+        }
+
+        function getCellValue(row, idx) {
+            const td = row.children[idx];
+            if (!td) return '';
+            return td.dataset.sortValue ?? (td.textContent ?? '');
+        }
+
+        function compareValues(aVal, bVal, type) {
+            if (type === 'number') {
+                const an = parseFloat(aVal);
+                const bn = parseFloat(bVal);
+                const aNum = isNaN(an) ? -Infinity : an;
+                const bNum = isNaN(bn) ? -Infinity : bn;
+                return aNum - bNum;
+            } else if (type === 'date') {
+                const at = Date.parse(aVal) || 0;
+                const bt = Date.parse(bVal) || 0;
+                return at - bt;
+            } else {
+                return aVal.toString().localeCompare(bVal.toString(), undefined, { numeric: true, sensitivity: 'base' });
+            }
+        }
+
+        function sortByColumn(colIndex, type) {
+            if (currentSort.index === colIndex) currentSort.asc = !currentSort.asc;
+            else { currentSort.index = colIndex; currentSort.asc = true; }
+
+            ths.forEach(th => th.classList.remove('sorted','asc','desc'));
+            const activeTh = Array.from(document.querySelectorAll('#fightersTable thead th'))[colIndex];
+            if (activeTh) activeTh.classList.add('sorted', currentSort.asc ? 'asc' : 'desc');
+
+            rows.sort((a, b) => {
+                const aVal = getCellValue(a, colIndex);
+                const bVal = getCellValue(b, colIndex);
+                const cmp = compareValues(aVal, bVal, type);
+                return currentSort.asc ? cmp : -cmp;
+            });
+
+            rows.forEach(r => tbody.appendChild(r));
+            applyFilters();
+        }
+
+        ths.forEach(th => {
+            const colIndex = Array.from(th.parentNode.children).indexOf(th);
+            const type = th.dataset.type || 'text';
+            th.addEventListener('click', () => sortByColumn(colIndex, type));
+        });
+
+        // live updates on input / selection
+        [searchBox, filterStance, filterYear, filterWins].forEach(el => {
+            if (!el) return;
+            el.addEventListener('input', applyFilters);
+            el.addEventListener('change', applyFilters);
+        });
+
+        clearBtn.addEventListener('click', () => {
+            searchBox.value = '';
+            // reset to placeholder (empty value)
+            if (filterStance) filterStance.value = '';
+            if (filterYear) filterYear.value = '';
+            if (filterWins) filterWins.value = '';
+            applyFilters();
+        });
+
+        // initial sort + display
+        rows.sort((a, b) => {
+            const aPct = parseFloat(a.getAttribute('data-winpct') || "0");
+            const bPct = parseFloat(b.getAttribute('data-winpct') || "0");
+            const aPctNum = isNaN(aPct) ? 0 : aPct;
+            const bPctNum = isNaN(bPct) ? 0 : bPct;
+            if (Math.abs(bPctNum - aPctNum) > Number.EPSILON) return bPctNum - aPctNum;
+            const aWins = parseInt(a.getAttribute('data-wins') || "0", 10);
+            const bWins = parseInt(b.getAttribute('data-wins') || "0", 10);
+            if (bWins !== aWins) return bWins - aWins;
+            const aFights = parseInt(a.getAttribute('data-fights') || "0", 10);
+            const bFights = parseInt(b.getAttribute('data-fights') || "0", 10);
+            return bFights - aFights;
+        });
+        rows.forEach(r => tbody.appendChild(r));
+
+        applyFilters();
+
+        // mobile filters toggle hookup (if present)
+        const filtersToggle = document.getElementById('filtersToggle');
+        const filtersPanel = document.querySelector('.controls .filters');
+        if (filtersToggle && filtersPanel) {
+            filtersToggle.addEventListener('click', function() {
+                const open = filtersPanel.classList.toggle('open');
+                filtersPanel.style.display = open ? 'flex' : '';
+                filtersToggle.setAttribute('aria-expanded', open);
+            });
+        }
+
+        // mobile theme toggle (optional)
+        const themeToggleMobile = document.getElementById('themeToggleMobile');
+        const themeToggleGlobal = document.getElementById('themeToggle');
+        function toggleTheme() {
+            const isLight = document.body.classList.toggle('theme-light');
+            try { localStorage.setItem('ufc-theme', isLight ? 'light' : 'dark'); } catch(_){}
+            if (themeToggleGlobal) themeToggleGlobal.setAttribute('aria-pressed', isLight);
+        }
+        if (themeToggleMobile) themeToggleMobile.addEventListener('click', toggleTheme);
+        if (themeToggleGlobal) themeToggleGlobal.addEventListener('click', toggleTheme);
+    })();
+</script>
+}
