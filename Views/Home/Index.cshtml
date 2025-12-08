@@ -73,7 +73,13 @@
                         data-wins="@(w.ToString(CultureInfo.InvariantCulture))"
                         data-fights="@(fights.ToString(CultureInfo.InvariantCulture))"
                         data-winpct="@(winPct.ToString(CultureInfo.InvariantCulture))">
-                        <td data-sort-value="@(f.Name ?? "")">@f.Name</td>
+                        <td data-sort-value="@(f.Name ?? "")">
+                            <strong class="me-2"><a class="fighter-link" href="/Fighters/@Uri.EscapeDataString(f.Name ?? string.Empty)">@f.Name</a></strong>
+                            @if (!string.IsNullOrWhiteSpace(f.Nickname))
+                            {
+                                <small class="text-muted">(@f.Nickname)</small>
+                            }
+                        </td>
                         <td data-sort-value="@(f.Stance ?? "Unknown")">@{ var stanceText = f.Stance ?? "Unknown"; }@stanceText</td>
                         <td data-sort-value="@(w.ToString(CultureInfo.InvariantCulture))" class="nowrap">@(w)-@(l)-@(d)</td>
                         <td data-sort-value="@(f.HeightCm?.ToString(CultureInfo.InvariantCulture) ?? "")" class="muted">@f.HeightCm</td>

@@ -5,6 +5,8 @@ namespace UfcStatsWeb.Services
 {
     public interface IFightsDataService
     {
-        IReadOnlyList<FightRecord> GetAllFights();
+        IEnumerable<FightRecord> GetAll();
+        IEnumerable<FightRecord> GetAllFights();
+        IEnumerable<FightRecord> GetByFighterName(string name);
     }
 }

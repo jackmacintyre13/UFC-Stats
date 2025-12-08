@@ -1,0 +1,42 @@
+@page "/Fighters/{id?}"
+@model UfcStatsWeb.Pages.Fighters.DetailsModel
+@{
+ Layout = "~/Views/Shared/_Layout.cshtml";
+ ViewData["Title"] = "Fighter";
+}
+
+<div class="container">
+ <h1>@(Model.Fighter?.Name ?? "Fighter")</h1>
+ @if (Model.Fighter != null)
+ {
+ <div class="card p-3">
+ <h3>@Model.Fighter.Name <small class="text-muted">(@Model.Fighter.Nickname)</small></h3>
+ <dl class="row">
+ <dt class="col-sm-3">Stance &amp; Record</dt><dd class="col-sm-9">@(Model.Fighter.Stance ?? "-") — @(Model.Fighter.Wins ??0)-@(Model.Fighter.Losses ??0)-@(Model.Fighter.Draws ??0)</dd>
+ <dt class="col-sm-3">Height</dt><dd class="col-sm-9">@(Model.Fighter.HeightCm?.ToString() ?? "-")</dd>
+ <dt class="col-sm-3">Weight</dt><dd class="col-sm-9">@(Model.Fighter.WeightInKg?.ToString("0.#") ?? "-")</dd>
+ <dt class="col-sm-3">Reach</dt><dd class="col-sm-9">@(Model.Fighter.ReachInCm?.ToString() ?? "-")</dd>
+ <dt class="col-sm-3">Born</dt><dd class="col-sm-9">@(Model.Fighter.DateOfBirth?.ToString("dd MMM yyyy") ?? "-")</dd>
+ <dt class="col-sm-3">Strikes landed / min</dt><dd class="col-sm-9">@(Model.Fighter.SignificantStrikesLandedPerMinute?.ToString() ?? "-")</dd>
+ <dt class="col-sm-3">Striking accuracy</dt><dd class="col-sm-9">@(Model.Fighter.SignificantStrikingAccuracy?.ToString("P1") ?? "-")</dd>
+ <dt class="col-sm-3">Takedowns /15min</dt><dd class="col-sm-9">@(Model.Fighter.AverageTakedownsLandedPer15Minutes?.ToString() ?? "-")</dd>
+ </dl>
+ </div>
+
+ <h4 class="mt-4">Previous fights</h4>
+ <div class="list-group">
+ @foreach (var fr in Model.Fights)
+ {
+ <div class="list-group-item">
+ <div><strong>@fr.RedFighterName vs @fr.BlueFighterName</strong></div>
+ <div><small class="text-muted">@fr.EventName — @(fr.EventDate?.ToString("dd MMM yyyy") ?? "")</small></div>
+ <div>Method: @fr.Method</div>
+ </div>
+ }
+ </div>
+ }
+ else
+ {
+ <div class="alert alert-warning">Fighter not found.</div>
+ }
+</div>

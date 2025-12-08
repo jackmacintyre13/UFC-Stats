@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.AspNetCore.Mvc;
 using UfcStatsWeb.Services;
 using UfcStatsWeb.Models;
+using System.Net;
 
 namespace UfcStatsWeb.Pages.Fights
 {
@@ -34,7 +35,8 @@ namespace UfcStatsWeb.Pages.Fights
                 ).ToList();
             }
 
-            Fights = fights;
+            // Ensure we always assign an IReadOnlyList<T>.
+            Fights = fights is IReadOnlyList<FightRecord> ro ? ro : fights.ToList();
         }
     public string NormalizeName(string s)
         {

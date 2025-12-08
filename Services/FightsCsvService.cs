@@ -1,112 +1,63 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using UfcStatsWeb.Models;
 
 namespace UfcStatsWeb.Services
 {
-    // Loads and parses a CSV placed at wwwroot/data/fights.csv (loaded once).
+    // Loads and parses a TSV (tab-separated values) file placed at wwwroot/data/ufc_fights.csv (loaded once).
     public class FightsCsvService : IFightsDataService
     {
-        private readonly IReadOnlyList<FightRecord> _fights;
-        private readonly ILogger<FightsCsvService> _logger;
+        private readonly List<FightRecord> _fights = new List<FightRecord>();
 
-        public FightsCsvService(IHostEnvironment env, ILogger<FightsCsvService> logger)
+        public FightsCsvService()
         {
-            _logger = logger;
-            try
+            var path = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "data", "ufc_fights.csv");
+            if (!File.Exists(path)) return;
+            var lines = File.ReadAllLines(path);
+            if (lines.Length <= 1) return;
+            string[] headers = lines[0].Contains('\t') ? lines[0].Split('\t').Select(h => h.Trim()).ToArray() : lines[0].Split(',').Select(h => h.Trim().Trim('"')).ToArray();
+            for (int i = 1; i < lines.Length; i++)
             {
-                var path = Path.Combine(env.ContentRootPath, "wwwroot", "data", "fights.csv");
-                if (!File.Exists(path))
-                {
-                    _logger.LogWarning("Fights CSV not found at {Path}", path);
-                    _fights = Array.Empty<FightRecord>();
-                    return;
-                }
-
-                var lines = File.ReadAllLines(path, Encoding.UTF8);
-                _fights = ParseCsv(lines).ToList().AsReadOnly();
-                _logger.LogInformation("Loaded {Count} records from fights CSV", _fights.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to load fights CSV");
-                _fights = Array.Empty<FightRecord>();
-            }
-        }
-
-        public IReadOnlyList<FightRecord> GetAllFights() => _fights;
-
-        private static IEnumerable<FightRecord> ParseCsv(string[] lines)
-        {
-            if (lines == null || lines.Length == 0) yield break;
-
-            int idx = 0;
-            while (idx < lines.Length && string.IsNullOrWhiteSpace(lines[idx])) idx++;
-            if (idx >= lines.Length) yield break;
-
-            var headerFields = SplitCsvLine(lines[idx]).Select(h => h.Trim()).ToArray();
-            idx++;
-
-            for (; idx < lines.Length; idx++)
-            {
-                var line = lines[idx];
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                var fields = SplitCsvLine(line);
-
+                var row = lines[i];
+                string[] cols = row.Contains('\t') ? row.Split('\t') : SplitCsvLine(row);
                 var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                for (int i = 0; i < headerFields.Length; i++)
+                for (int c = 0; c < cols.Length && c < headers.Length; c++) dict[headers[c]] = cols[c].Trim('"');
+                try
                 {
-                    var key = headerFields[i];
-                    var val = i < fields.Length ? fields[i] : string.Empty;
-                    dict[key] = val;
+                    var fr = FightRecord.FromDictionary(dict);
+                    _fights.Add(fr);
                 }
-
-                yield return FightRecord.FromDictionary(dict);
+                catch
+                {
+                    // ignore malformed lines
+                }
             }
         }
 
-        // Basic CSV splitter (handles quoted fields and escaped quotes).
+        // CSV splitting that respects quoted commas
         private static string[] SplitCsvLine(string line)
         {
-            if (string.IsNullOrEmpty(line)) return Array.Empty<string>();
-            var sb = new StringBuilder();
-            var list = new List<string>();
-            bool inQuotes = false;
-
+            var cols = new List<string>();
+            var cur = string.Empty;
+            var inQuotes = false;
             for (int i = 0; i < line.Length; i++)
             {
-                char c = line[i];
-                if (c == '"')
-                {
-                    if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
-                    {
-                        sb.Append('"'); // escaped quote
-                        i++;
-                    }
-                    else
-                    {
-                        inQuotes = !inQuotes;
-                    }
-                    continue;
-                }
-
-                if (c == ',' && !inQuotes)
-                {
-                    list.Add(sb.ToString());
-                    sb.Clear();
-                    continue;
-                }
-
-                sb.Append(c);
+                var ch = line[i];
+                if (ch == '"') { inQuotes = !inQuotes; continue; }
+                if (ch == ',' && !inQuotes) { cols.Add(cur); cur = string.Empty; continue; }
+                cur += ch;
             }
-
-            list.Add(sb.ToString());
-            return list.ToArray();
+            cols.Add(cur);
+            return cols.ToArray();
         }
+
+        public IEnumerable<FightRecord> GetAll() => _fights;
+
+        public IEnumerable<FightRecord> GetAllFights() => _fights;
+
+        public IEnumerable<FightRecord> GetByFighterName(string name) => _fights.Where(f => (f.RedFighterName ?? string.Empty).IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0 || (f.BlueFighterName ?? string.Empty).IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0);
     }
 }
